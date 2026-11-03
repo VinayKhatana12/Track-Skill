@@ -30,3 +30,7 @@ coverage/
 .DS_Store
 Thumbs.db
 *.log
+
+# Local demo database cluster (Windows)
+../local-dev/
+local-dev/
