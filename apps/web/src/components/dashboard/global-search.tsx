@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from "react";
 
 import { globalSearch, type SearchResult } from "@/lib/api";
 import { useAuthStore } from "@/stores/auth-store";
-import { cn } from "@/lib/utils";
 
 export function GlobalSearch() {
   const role = useAuthStore((state) => state.user?.role);
@@ -90,7 +89,6 @@ export function GlobalSearch() {
       <span className="sr-only">
         Search scope: {role ?? "your role"}
       </span>
-      <span className={cn("hidden")} aria-hidden />
     </div>
   );
 }
