@@ -74,3 +74,43 @@
     scroll-behavior: auto;
   }
 }
+
+
+/* Realtime pulse: a soft ring fades around cards whose data just changed. */
+@keyframes realtime-pulse {
+  0% {
+    box-shadow: 0 0 0 3px rgba(30, 93, 95, 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 6px rgba(30, 93, 95, 0);
+  }
+}
+
+.realtime-pulse {
+  animation: realtime-pulse 2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .realtime-pulse {
+    animation: none;
+    outline: 2px solid rgba(30, 93, 95, 0.4);
+    outline-offset: 2px;
+  }
+}
+
+/* Print: isolate a section for "Export PDF (print)" */
+@media print {
+  body.printing-section * {
+    visibility: hidden;
+  }
+  body.printing-section .print-target,
+  body.printing-section .print-target * {
+    visibility: visible;
+  }
+  body.printing-section .print-target {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+}

@@ -144,7 +144,9 @@ trainees = sa.Table(
     "trainees",
     metadata,
     sa.Column("id", UUID, primary_key=True),
-    sa.Column("user_id", UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True),
+    sa.Column(
+        "user_id", UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
+    ),
     sa.Column(
         "centre_id", UUID, ForeignKey("training_centres.id", ondelete="CASCADE"), nullable=False
     ),
@@ -184,7 +186,9 @@ employers = sa.Table(
     "employers",
     metadata,
     sa.Column("id", UUID, primary_key=True),
-    sa.Column("user_id", UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True),
+    sa.Column(
+        "user_id", UUID, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
+    ),
     sa.Column("company_name", String(255), nullable=False),
     sa.Column("sector", String(120), nullable=False),
     sa.Column("district", String(120), nullable=False),

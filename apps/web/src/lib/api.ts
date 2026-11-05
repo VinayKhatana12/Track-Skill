@@ -48,6 +48,15 @@ export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
+export function getAccessToken(): string | null {
+  return accessToken;
+}
+
+/** Ensures the in-memory access token is fresh (single-flight refresh). */
+export async function ensureFreshToken(): Promise<boolean> {
+  return refreshAccessToken();
+}
+
 const authExpiredListeners = new Set<() => void>();
 
 /** Register a callback fired when the session cannot be restored. */
@@ -283,4 +292,361 @@ export async function respondFollowupStructured(
 
 export async function runTracerNow(): Promise<TracerRunSummary> {
   return api.post<TracerRunSummary>("/admin/tracer/run");
+}
+
+// ── Admin endpoints ──────────────────────────────────────────────────────────
+
+export async function fetchAdminOverview(): Promise<AdminOverview> {
+  return api.get("/admin/overview");
+}
+
+export async function fetchAdminProviders(): Promise<LeaderboardRow[]> {
+  return api.get("/admin/providers");
+}
+
+export async function fetchAdminProviderDetail(
+  centreId: string,
+): Promise<AdminProviderDetail> {
+  return api.get(`/admin/providers/${centreId}`);
+}
+
+export async function fetchGapReports(): Promise<GapReportRow[]> {
+  return api.get("/admin/curriculum-gaps");
+}
+
+export async function fetchEvents(limit: number): Promise<EventItem[]> {
+  return api.get(`/admin/events?limit=${limit}`);
+}
+
+export async function submitAllocation(payload: {
+  centre_id: string;
+  amount: number;
+  rationale: string;
+}): Promise<{ allocation_id: string; amount: number; rationale: string }> {
+  return api.post("/admin/allocations", payload);
+}
+
+export async function resetDemoData(): Promise<{ status: string; users: number }> {
+  return api.post("/admin/demo/reset");
+}
+
+export async function runAnomalyScan(): Promise<{
+  raised: { rule: string }[];
+  raised_count: number;
+}> {
+  return api.post("/admin/anomalies/scan");
+}
+
+// ── Admin types ──────────────────────────────────────────────────────────────
+
+export interface AdminOverview {
+  trainees: number;
+  certified: number;
+  placed: number;
+  employment_rate: number;
+  retention_3m: number;
+  retention_6m: number;
+  retention_12m: number;
+  median_wage_uplift: number;
+  self_employment_share: number;
+  verification_rate: number;
+  demo_mode?: boolean;
+  districts: {
+    district: string;
+    trainees: number;
+    certified: number;
+    working: number;
+    employment_rate: number;
+  }[];
+}
+
+export interface LeaderboardRow {
+  centre_id: string;
+  centre_name: string;
+  district: string;
+  rank: number;
+  ppi_score: number;
+  placement_rate: number;
+  verification_rate: number;
+  response_rate: number;
+}
+
+export interface AdminProviderDetail {
+  centre: { id: string; name: string; district: string };
+  enrolled: number;
+  certified: number;
+  placement_rate: number;
+  verification_rate: number;
+  ppi_score: number;
+  score_history: {
+    period: string;
+    ppi_score: number;
+    placement_rate: number;
+    verification_rate: number;
+  }[];
+  allocations: { id: string; amount: number; rationale: string; decided_at: string | null }[];
+}
+
+export interface GapReportRow {
+  course_id: string;
+  title: string;
+  sector: string;
+  centre_name: string;
+  district: string;
+  course_skills: string[];
+  coverage: number;
+  gap_score: number;
+  missing_in_demand_skills: { skill: string; demand_score: number }[];
+  suggested_modules: string[];
+}
+
+export interface EventItem {
+  id: string;
+  type: string;
+  actor_user_id: string | null;
+  actor_role: string;
+  payload: Record<string, unknown>;
+  created_at: string | null;
+}
+
+
+// ── Notifications ────────────────────────────────────────────────────────────
+
+export interface NotificationItem {
+  id: string;
+  title: string;
+  body: string;
+  link: string | null;
+  read: boolean;
+  created_at: string | null;
+}
+
+export async function fetchNotifications(): Promise<{
+  unread: number;
+  items: NotificationItem[];
+}> {
+  return api.get("/notifications");
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  await api.post(`/notifications/${id}/read`);
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await api.post("/notifications/read-all");
+}
+
+// ── Search ───────────────────────────────────────────────────────────────────
+
+export interface SearchResult {
+  type: string;
+  label: string;
+  detail: string | null;
+}
+
+export async function globalSearch(q: string): Promise<{ results: SearchResult[] }> {
+  return api.get(`/search?q=${encodeURIComponent(q)}`);
+}
+
+// ── Trainee employment + assessment ─────────────────────────────────────────
+
+export interface EmploymentSelfReport {
+  employment_status: "EMPLOYED" | "SELF_EMPLOYED" | "UNEMPLOYED" | "FURTHER_STUDY";
+  job_title: string;
+  monthly_wage: number;
+  started_on?: string;
+  employer_id?: string;
+}
+
+export async function reportEmployment(payload: EmploymentSelfReport): Promise<{
+  employment_record_id: string;
+  verification_id: string;
+  verified: boolean;
+}> {
+  return api.post("/trainee/employment", payload);
+}
+
+export async function assessSkills(payload: {
+  self_reported_skills?: string[];
+  free_text?: string;
+}): Promise<{
+  profile: { skill: string; sector: string; confidence: number }[];
+  role_matches: { title: string; sector: string; score: number; explanation: string }[];
+  mode: string;
+}> {
+  return api.post("/trainee/skills/assessment", payload);
+}
+
+// ── Provider extras ──────────────────────────────────────────────────────────
+
+export interface ProviderCourse {
+  id: string;
+  title: string;
+  sector: string;
+}
+
+export async function fetchProviderCourses(): Promise<ProviderCourse[]> {
+  return api.get("/provider/courses");
+}
+
+export interface ProviderOverview {
+  centre: { id: string; name: string; district: string };
+  enrolled: number;
+  certified: number;
+  dropped: number;
+  placements: number;
+  consent_rate: number;
+  response_rate: number;
+  placement_rate: number;
+  retention_3m: number;
+  retention_6m: number;
+  retention_12m: number;
+  ppi_score: number;
+  ppi_rank: number;
+  total_centres: number;
+}
+
+export interface ProviderTraineeRow {
+  id: string;
+  name: string;
+  email: string;
+  course_id: string;
+  course_title: string | null;
+  status: string;
+  enrolled_on: string;
+  certified_on: string | null;
+  consent_active: boolean;
+}
+
+export interface ProviderFollowupItem {
+  followup_id: string;
+  trainee_id: string;
+  trainee_name: string;
+  milestone: string;
+  due_on: string;
+  channel: string;
+  state?: string;
+  raw_text?: string;
+  parsed?: Record<string, unknown>;
+}
+
+export interface ProviderFollowups {
+  overdue: ProviderFollowupItem[];
+  due_soon: ProviderFollowupItem[];
+  manual_review: ProviderFollowupItem[];
+}
+
+export async function fetchProviderOverview(): Promise<ProviderOverview> {
+  return api.get("/provider/overview");
+}
+
+export async function fetchProviderTrainees(): Promise<ProviderTraineeRow[]> {
+  return api.get("/provider/trainees");
+}
+
+export async function fetchProviderFollowups(): Promise<ProviderFollowups> {
+  return api.get("/provider/followups");
+}
+
+export async function certifyTrainee(traineeId: string): Promise<{
+  trainee_id: string;
+  certified_on: string;
+  consent_active: boolean;
+  followups_scheduled: number;
+}> {
+  return api.patch(`/provider/trainees/${traineeId}/certify`, {});
+}
+
+export async function enrolTrainee(payload: {
+  name: string;
+  email: string;
+  phone: string;
+  course_id: string;
+  centre_id?: string;
+}): Promise<{ trainee: { id: string }; temporary_password: string }> {
+  return api.post("/provider/trainees", payload);
+}
+
+export async function fetchProviderGapAlerts(): Promise<
+  { course_id: string; title: string; gap_score: number; missing_in_demand_skills: { skill: string; demand_score: number }[]; suggested_modules: string[] }[]
+> {
+  return api.get("/provider/curriculum-gaps");
+}
+
+// ── Employer extras ──────────────────────────────────────────────────────────
+
+export interface EmployerImpact {
+  hires: number;
+  verified_hires: number;
+  working: number;
+  retention_3m: number;
+  retention_6m: number;
+  retention_12m: number;
+  avg_monthly_wage: number;
+}
+
+export async function fetchEmployerImpact(): Promise<EmployerImpact> {
+  return api.get("/employer/impact");
+}
+
+export async function fetchVerifications(
+  status?: "pending" | "confirmed" | "disputed",
+): Promise<VerificationRow[]> {
+  const params = status ? `?status=${status}` : "";
+  return api.get(`/employer/verifications${params}`);
+}
+
+export async function markConfirmed(
+  verificationId: string,
+): Promise<{ verification_id: string; verified: boolean }> {
+  return api.post(`/employer/verifications/${verificationId}/confirm`);
+}
+
+export async function markDisputed(
+  verificationId: string,
+  reason: string,
+): Promise<{ verification_id: string; employer_signal: string }> {
+  return api.post(`/employer/verifications/${verificationId}/dispute`, { reason });
+}
+
+export interface VerificationRow {
+  verification_id: string;
+  trainee_name: string;
+  employment_status: string;
+  job_title: string | null;
+  monthly_wage: number | null;
+  trainee_signal: string;
+}
+
+export interface TalentPoolRow {
+  skill: string;
+  trainee_count: number;
+  districts: string[];
+  trainee_names: string[];
+  match_score: number;
+}
+
+export async function fetchTalentPool(
+  skill?: string,
+  district?: string,
+): Promise<TalentPoolRow[]> {
+  const params = new URLSearchParams();
+  if (skill) params.set("skill", skill);
+  if (district) params.set("district", district);
+  return api.get(`/employer/talent-pool?${params.toString()}`);
+}
+
+// ── Admin extras ─────────────────────────────────────────────────────────────
+
+export interface GapReportRow {
+  course_id: string;
+  title: string;
+  sector: string;
+  centre_name: string;
+  district: string;
+  course_skills: string[];
+  coverage: number;
+  gap_score: number;
+  missing_in_demand_skills: { skill: string; demand_score: number }[];
+  suggested_modules: string[];
 }

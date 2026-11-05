@@ -5,10 +5,12 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from app.ai import skills as ai_skills
+from app.core.config import get_settings
 from app.core.constants import WORKING_STATUSES
 from app.models import (
     EmploymentRecord,
@@ -318,3 +320,43 @@ def events_feed(db: Session, limit: int = 50) -> list[dict]:
 
 def curriculum_gaps(db: Session, limit: int = 10) -> list[dict]:
     return ai_skills.curriculum_gaps(db, limit=limit)
+
+
+async def reset_demo_data(db: Session) -> dict:
+    """DEMO_MODE only: wipe all domain tables and regenerate the seed."""
+
+    import random
+
+    from app.core.security import hash_password
+    from app.seed import INGEST_ORDER, SeedIngestor, build_seed_data
+
+    db.execute(
+        sa_text(
+            "TRUNCATE notifications, events, fund_allocations, provider_scores, "
+            "market_demand, verifications, employment_records, followups, consents, "
+            "trainees, courses, employers, provider_staff, training_centres, users, "
+            "contact_messages RESTART IDENTITY CASCADE"
+        )
+    )
+
+    settings = get_settings()
+    rng = random.Random(20260401)
+    password_hash = hash_password(settings.demo_password)
+    data = build_seed_data(rng, password_hash)
+
+    ingestor = SeedIngestor(db)
+    for label, model in INGEST_ORDER:
+        ingestor.ingest(label, model, data[label])
+    db.flush()
+
+    await publish_event(
+        db,
+        event_type="DEMO_RESET",
+        actor_user_id=None,
+        actor_role="SYSTEM",
+        payload={"source": "admin-dashboard"},
+        audience_roles=["ADMIN", "PROVIDER"],
+    )
+    user_count = db.execute(select(func.count()).select_from(User)).scalar_one()
+    logger.info("Demo data reset: %s users restored", user_count)
+    return {"status": "reset", "users": user_count}

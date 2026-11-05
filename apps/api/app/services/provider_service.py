@@ -445,3 +445,14 @@ def provider_followups(db: Session, user: User) -> dict:
 
 def _course_id_for_trainee(db: Session, trainee_id: UUID) -> UUID:
     return db.execute(select(Trainee.course_id).where(Trainee.id == trainee_id)).scalar_one()
+
+
+def provider_courses(db: Session, user: User) -> list[dict]:
+    centre_ids = provider_centre_ids(db, user)
+    courses = db.execute(
+        select(Course).where(Course.centre_id.in_(centre_ids)).order_by(Course.title)
+    ).scalars().all()
+    return [
+        {"id": str(course.id), "title": course.title, "sector": course.sector}
+        for course in courses
+    ]

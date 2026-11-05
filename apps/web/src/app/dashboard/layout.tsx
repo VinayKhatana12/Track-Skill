@@ -1,16 +1,25 @@
 "use client";
 
-import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
+import { useEffect } from "react";
 
-import { Logo } from "@/components/logo";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { Button } from "@/components/ui/button";
+import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
 import { useAuthStore } from "@/stores/auth-store";
+import { useRealtimeStore } from "@/stores/realtime-store";
 
+/** Authenticated shell wrapper: guards unauthenticated visitors, opens the
+ * realtime socket and invalidates React Query caches when domain events
+ * arrive. The visual chrome (sidebar, top bar, tabs) is rendered per role
+ * page via DashboardShell. */
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const { status, user, bootstrap, signOut } = useAuthStore();
+  const queryClient = useQueryClient();
+  const user = useAuthStore((state) => state.user);
+  const status = useAuthStore((state) => state.status);
+  const bootstrap = useAuthStore((state) => state.bootstrap);
+
+  useRealtimeConnection(status === "authenticated");
 
   useEffect(() => {
     if (status === "idle") {
@@ -24,6 +33,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     }
   }, [status, router]);
 
+  // Any domain event may change data anywhere — invalidate all queries.
+  useEffect(() => {
+    const unsubscribe = useRealtimeStore.subscribe((state) => {
+      if (state.lastEvent) {
+        void queryClient.invalidateQueries();
+      }
+    });
+    return unsubscribe;
+  }, [queryClient]);
+
   if (status !== "authenticated" || !user) {
     return (
       <div className="flex min-h-dvh items-center justify-center bg-background text-muted-foreground">
@@ -34,39 +53,5 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     );
   }
 
-  return (
-    <div className="flex min-h-dvh flex-col">
-      <a
-        href="#main"
-        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground"
-      >
-        Skip to main content
-      </a>
-
-      <header className="sticky top-0 z-40 border-b border-border/70 bg-background/80 backdrop-blur">
-        <div className="container flex h-16 items-center justify-between gap-4">
-          <Logo />
-          <div className="flex items-center gap-3">
-            <span className="hidden rounded-full border border-border px-3 py-1 text-xs font-medium text-muted-foreground sm:inline">
-              {user.name} · {user.role}
-            </span>
-            <ThemeToggle />
-            <Button variant="outline" size="sm" onClick={() => void signOut()}>
-              Sign out
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <main id="main" className="container flex-1 py-10">
-        {children}
-      </main>
-
-      <footer className="border-t border-border/70 py-6">
-        <div className="container text-sm text-muted-foreground">
-          TrackSkill AI · signed in as {user.email}
-        </div>
-      </footer>
-    </div>
-  );
+  return <>{children}</>;
 }

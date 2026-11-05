@@ -15,11 +15,13 @@ from app.models import (
     Course,
     Employer,
     EmploymentRecord,
+    FollowUp,
+    MarketDemand,
     Trainee,
     User,
     Verification,
 )
-from app.models.enums import TraineeStatus, VerificationSignal
+from app.models.enums import FollowUpMilestone, FollowUpState, TraineeStatus, VerificationSignal
 from app.services import ppi
 from app.services.realtime import NotificationDraft, publish_event
 
@@ -274,8 +276,17 @@ async def hire_trainee(
     }
 
 
-def talent_pool(db: Session, employer: Employer, skill_filter: str | None) -> list[dict]:
-    """Certified trainees with active consent, grouped by their skills."""
+def talent_pool(
+    db: Session,
+    employer: Employer,
+    skill_filter: str | None = None,
+    district_filter: str | None = None,
+) -> list[dict]:
+    """Certified trainees with active consent, grouped by their skills.
+
+    match_score blends the market demand for the skill with embedding
+    similarity when a search term is given (light-NLP mode keeps it lexical).
+    """
     rows = db.execute(
         select(Trainee, User, Course)
         .join(User, Trainee.user_id == User.id)
@@ -294,21 +305,105 @@ def talent_pool(db: Session, employer: Employer, skill_filter: str | None) -> li
     for trainee, user, course in rows:
         if trainee.id not in consented_ids:
             continue
+        if district_filter and trainee.district.lower() != district_filter.lower():
+            continue
         for skill in course.skills or []:
             if skill_filter and skill_filter.lower() not in skill.lower():
                 continue
-            entry = pool.setdefault(skill, {"count": 0, "districts": set(), "names": []})
+            entry = pool.setdefault(
+                skill,
+                {"count": 0, "districts": set(), "names": []},
+            )
             entry["count"] += 1
             entry["districts"].add(trainee.district)
             if len(entry["names"]) < 3:
                 entry["names"].append(user.name)
 
-    return [
-        {
-            "skill": skill,
-            "trainee_count": entry["count"],
-            "districts": sorted(entry["districts"]),
-            "trainee_names": entry["names"],
-        }
-        for skill, entry in sorted(pool.items(), key=lambda item: (-item[1]["count"], item[0]))
-    ]
+    from app.ai.embedder import cosine, get_embedder
+
+    demand_by_skill: dict[str, float] = {}
+    months = db.execute(select(MarketDemand.month).distinct()).scalars().all()
+    if months:
+        latest = max(months)
+        for row in db.execute(select(MarketDemand).where(MarketDemand.month == latest)).scalars():
+            demand_by_skill[row.skill] = row.demand_score
+
+    embedder = get_embedder()
+    search_vector = (
+        embedder.encode([skill_filter])[0] if skill_filter and skill_filter.strip() else None
+    )
+
+    results = []
+    for skill, entry in pool.items():
+        demand = demand_by_skill.get(skill, 40.0) / 100.0
+        match = demand
+        if search_vector is not None:
+            skill_vector = embedder.encode([skill])[0]
+            match = max(demand * 0.5, cosine(search_vector, skill_vector))
+        results.append(
+            {
+                "skill": skill,
+                "trainee_count": entry["count"],
+                "districts": sorted(entry["districts"]),
+                "trainee_names": entry["names"],
+                "match_score": round(min(1.0, match), 2),
+            }
+        )
+    results.sort(key=lambda item: (-item["match_score"], -item["trainee_count"], item["skill"]))
+    return results
+
+
+def impact(db: Session, employer: Employer) -> dict:
+    """Retention and verification stats for this employer's hires."""
+    records = db.execute(
+        select(EmploymentRecord).where(EmploymentRecord.employer_id == employer.id)
+    ).scalars().all()
+    trainee_ids = [record.trainee_id for record in records]
+    verifications = {}
+    if trainee_ids:
+        for verification in db.execute(
+            select(Verification).where(Verification.employment_record_id.in_(
+                [record.id for record in records]
+            ))
+        ).scalars():
+            verifications[verification.employment_record_id] = (
+                verification.trainee_signal,
+                verification.employer_signal,
+            )
+    from app.services.ppi import is_verified
+
+    verified_count = sum(is_verified(signals) for signals in verifications.values())
+    working = [r for r in records if r.status in WORKING_STATUSES]
+
+    followups: list = []
+    if trainee_ids:
+        followups = db.execute(
+            select(FollowUp).where(FollowUp.trainee_id.in_(trainee_ids))
+        ).scalars().all()
+    retention = {}
+    for milestone in (FollowUpMilestone.M3, FollowUpMilestone.M6, FollowUpMilestone.M12):
+        responded = [
+            f for f in followups
+            if f.milestone is milestone and f.state is FollowUpState.RESPONDED
+        ]
+        still_working = [
+            f for f in responded
+            if (f.response_json or {}).get("employment")
+            in {s.value for s in WORKING_STATUSES}
+        ]
+        retention[milestone.value] = (
+            round(len(still_working) / len(responded), 4) if responded else 0.0
+        )
+
+    wages = [float(r.monthly_wage) for r in working if r.monthly_wage]
+    avg_wage = round(sum(wages) / len(wages), 2) if wages else 0.0
+
+    return {
+        "hires": len(records),
+        "verified_hires": verified_count,
+        "working": len(working),
+        "retention_3m": retention["M3"],
+        "retention_6m": retention["M6"],
+        "retention_12m": retention["M12"],
+        "avg_monthly_wage": avg_wage,
+    }

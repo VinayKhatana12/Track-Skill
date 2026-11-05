@@ -331,6 +331,48 @@ def me_view(db: Session, trainee: Trainee) -> dict:
         for followup in followups
         if followup.state in (FollowUpState.SCHEDULED, FollowUpState.SENT)
     ]
+
+    verification_signals = {
+        verification.employment_record_id: (
+            verification.trainee_signal,
+            verification.employer_signal,
+        )
+        for verification in db.execute(
+            select(Verification).where(
+                Verification.employment_record_id.in_(
+                    [record.id for record in records] or [uuid4()]
+                )
+            )
+        ).scalars()
+    }
+    from app.services.ppi import is_verified
+
+    employment = None
+    if records:
+        record = records[-1]
+        signals = verification_signals.get(record.id, (None, None))
+        employment = {
+            "employment_record_id": str(record.id),
+            "status": record.status.value,
+            "job_title": record.job_title,
+            "monthly_wage": float(record.monthly_wage) if record.monthly_wage else None,
+            "started_on": record.started_on.isoformat() if record.started_on else None,
+            "employer_id": str(record.employer_id) if record.employer_id else None,
+            "trainee_signal": signals[0].value if signals[0] else None,
+            "employer_signal": signals[1].value if signals[1] else None,
+            "verified": is_verified(signals),
+        }
+
+    consent_state = [
+        {
+            "channel": consent.channel.value,
+            "granted": consent.granted,
+            "active": consent.granted and consent.revoked_at is None,
+            "version": consent.version,
+        }
+        for consent in consents
+    ]
+
     return {
         "profile": {
             "id": str(trainee.id),
@@ -342,6 +384,8 @@ def me_view(db: Session, trainee: Trainee) -> dict:
             "status": trainee.status.value,
             "course_title": course.title if course else None,
         },
+        "consents": consent_state,
+        "employment": employment,
         "timeline": timeline,
         "upcoming": upcoming,
     }
@@ -355,6 +399,105 @@ def skills_view(db: Session, trainee: Trainee) -> dict:
         "recommendations": ai_skills.recommended_skills(
             db, own_skills, district=trainee.district, limit=5
         ),
+    }
+
+
+async def report_employment(db: Session, *, trainee: Trainee, payload) -> dict:
+    """Trainee self-reports current employment (dashboard employment card).
+
+    Creates or updates the employment record and its dual-signal
+    verification: the trainee signal is CONFIRMED (own report) and the
+    employer signal stays PENDING until the employer confirms.
+    """
+    employer_id = payload.employer_id
+    if employer_id is not None and db.get(Employer, employer_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employer not found.")
+
+    record = db.execute(
+        select(EmploymentRecord)
+        .where(EmploymentRecord.trainee_id == trainee.id)
+        .order_by(EmploymentRecord.created_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if record is None:
+        record = EmploymentRecord(
+            id=uuid4(),
+            trainee_id=trainee.id,
+            employer_id=employer_id,
+            status=payload.employment_status,
+            job_title=payload.job_title,
+            monthly_wage=payload.monthly_wage,
+            started_on=payload.started_on or date.today(),
+        )
+        verification = None
+    else:
+        record.status = payload.employment_status
+        record.job_title = payload.job_title or record.job_title
+        if payload.monthly_wage is not None:
+            record.monthly_wage = payload.monthly_wage
+        if employer_id is not None:
+            record.employer_id = employer_id
+        verification = db.execute(
+            select(Verification).where(Verification.employment_record_id == record.id)
+        ).scalar_one_or_none()
+
+    db.add(record)
+    db.flush()
+
+    if verification is None:
+        verification = Verification(
+            id=uuid4(),
+            employment_record_id=record.id,
+            trainee_signal=VerificationSignal.CONFIRMED,
+            employer_signal=VerificationSignal.PENDING,
+        )
+        db.add(verification)
+    elif payload.employment_status in WORKING_STATUSES:
+        verification.trainee_signal = VerificationSignal.CONFIRMED
+    db.flush()
+
+    employer_user_id = None
+    if record.employer_id:
+        employer = db.get(Employer, record.employer_id)
+        employer_user_id = employer.user_id if employer else None
+
+    await publish_event(
+        db,
+        event_type="EMPLOYMENT_SELF_REPORTED",
+        actor_user_id=trainee.user_id,
+        actor_role="TRAINEE",
+        payload={
+            "trainee_id": str(trainee.id),
+            "employment_record_id": str(record.id),
+            "status": record.status.value,
+            "job_title": record.job_title,
+            "monthly_wage": float(record.monthly_wage) if record.monthly_wage else None,
+            "verification_id": str(verification.id),
+        },
+        audience_roles=["PROVIDER"],
+        audience_user_ids=[employer_user_id] if employer_user_id else [],
+        notifications=[
+            NotificationDraft(
+                user_id=employer_user_id,
+                title="Trainee reported employment",
+                body=(
+                    f"{payload.job_title or 'A role'} was self-reported at your company. "
+                    "Verify it when ready."
+                ),
+                link="/dashboard/employer",
+            )
+        ]
+        if employer_user_id
+        else [],
+    )
+    return {
+        "employment_record_id": str(record.id),
+        "verification_id": str(verification.id),
+        "trainee_signal": verification.trainee_signal.value,
+        "employer_signal": verification.employer_signal.value,
+        "verified": verification.trainee_signal is VerificationSignal.CONFIRMED
+        and verification.employer_signal is VerificationSignal.CONFIRMED,
     }
 
 

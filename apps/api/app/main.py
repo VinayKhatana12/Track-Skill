@@ -9,7 +9,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
 from app.realtime.ws import router as ws_router
-from app.routers import admin, auth, contact, employer, health, provider, trainee, trainees
+from app.routers import (
+    admin,
+    auth,
+    contact,
+    employer,
+    health,
+    notifications,
+    provider,
+    search,
+    trainee,
+    trainees,
+)
 
 logging.basicConfig(
     level=get_settings().log_level.upper(),
@@ -89,6 +100,8 @@ def create_app() -> FastAPI:
     application.include_router(health.router)
     application.include_router(auth.router)
     application.include_router(contact.router)
+    application.include_router(notifications.router)
+    application.include_router(search.router)
     application.include_router(trainees.router)
     application.include_router(provider.router)
     application.include_router(trainee.router)

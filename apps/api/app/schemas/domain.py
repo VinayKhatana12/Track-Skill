@@ -43,6 +43,14 @@ class RespondFollowUpRequest(BaseModel):
     employer_id: UUID | None = None
 
 
+class EmploymentSelfReportRequest(BaseModel):
+    employment_status: EmploymentStatus
+    job_title: str = Field(min_length=2, max_length=255)
+    monthly_wage: float = Field(gt=0)
+    started_on: date | None = None
+    employer_id: UUID | None = None
+
+
 class HireTraineeRequest(BaseModel):
     job_title: str = Field(min_length=2, max_length=255)
     monthly_wage: float = Field(gt=0)

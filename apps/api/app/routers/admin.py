@@ -84,6 +84,17 @@ async def flag_provider(
     )
 
 
+@router.post("/demo/reset", summary="Reset demo data (DEMO_MODE only)")
+async def demo_reset(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.ADMIN)),
+) -> dict:
+    settings = get_settings()
+    if not settings.demo_mode:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found.")
+    return await admin_service.reset_demo_data(db)
+
+
 @router.get(
     "/curriculum-gaps",
     summary="Per-course curriculum-demand gap report (AI module)",

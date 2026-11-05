@@ -74,8 +74,18 @@ async def hire(
 @router.get("/talent-pool", summary="Certified, consented trainees by skill")
 def talent_pool(
     skill: str | None = Query(default=None, description="Substring filter"),
+    district: str | None = Query(default=None, description="District filter"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.EMPLOYER)),
 ) -> list[dict]:
     employer = employer_service.own_employer(db, current_user.id)
-    return employer_service.talent_pool(db, employer, skill)
+    return employer_service.talent_pool(db, employer, skill, district)
+
+
+@router.get("/impact", summary="Retention and verification stats for your hires")
+def impact(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.EMPLOYER)),
+) -> dict:
+    employer = employer_service.own_employer(db, current_user.id)
+    return employer_service.impact(db, employer)

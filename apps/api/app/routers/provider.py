@@ -79,12 +79,32 @@ async def certify_trainee(
     )
 
 
+@router.get("/courses", summary="Courses offered by my centre(s)")
+def courses(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER)),
+) -> list[dict]:
+    return provider_service.provider_courses(db, current_user)
+
+
 @router.get("/overview", summary="Centre KPIs, PPI and rank")
 def overview(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.PROVIDER)),
 ) -> dict:
     return provider_service.provider_overview(db, current_user)
+
+
+@router.get("/curriculum-gaps", summary="Curriculum-demand gap alerts for your courses")
+def curriculum_gaps(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.PROVIDER)),
+) -> list[dict]:
+    from app.ai.curriculum_matcher import course_gap_report
+
+    centre_ids = set(provider_service.provider_centre_ids(db, current_user))
+    report = course_gap_report(db, limit=200)
+    return [row for row in report if row["course_id"] in {str(cid) for cid in centre_ids}]
 
 
 @router.get("/followups", summary="Due and overdue milestone tracers")
