@@ -1,0 +1,58 @@
+# Render Blueprint — TrackSkill AI backend.
+#
+# Deploys with one click: Render → New → Blueprint → pick this repo.
+# Creates a free PostgreSQL database plus the API web service. The frontend
+# deploys separately on Vercel (see DEPLOY.md); set CORS_ORIGINS there.
+#
+# Values marked `sync: false` must be filled in the Render dashboard after
+# the first apply (CORS_ORIGINS once the Vercel URL exists, VAPID keys once
+# generated — DEPLOY.md has the exact commands).
+
+services:
+  - type: web
+    name: trackskill-api
+    runtime: python
+    rootDir: apps/api
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash start.sh
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: trackskill-postgres
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ENVIRONMENT
+        value: production
+      - key: CORS_ORIGINS
+        sync: false # e.g. https://trackskill.vercel.app (set after Vercel deploy)
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: none # cross-site refresh cookie: Vercel frontend → Render API
+      - key: DEMO_MODE
+        value: "true" # capstone demo: enables GET /auth/demo-accounts + admin demo reset
+      - key: DEMO_PASSWORD
+        value: Demo@1234
+      - key: USE_LIGHT_NLP
+        value: "true" # deterministic embedder; no model download on free tier
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: TRACER_PROVIDER
+        value: simulated
+      - key: VAPID_PRIVATE_KEY
+        sync: false # python -m app.core.vapid (DEPLOY.md)
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: PUSH_SUBJECT
+        sync: false # mailto:you@yourmail.example
+
+databases:
+  - name: trackskill-postgres
+    databaseName: trackskill
+    user: trackskill
+    plan: free # free Postgres expires after 30 days — upgrade for a live demo

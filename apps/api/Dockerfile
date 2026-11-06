@@ -1,17 +1,18 @@
 FROM python:3.11-slim-bookworm
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1     PIP_NO_CACHE_DIR=1     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /app
 
-COPY requirements.txt requirements-dev.txt ./
-RUN pip install -r requirements.txt -r requirements-dev.txt
+# Production image: runtime dependencies only (dev/test tools live in CI).
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
 
 COPY . .
 
-EXPOSE 8000
+# start.sh applies migrations + the idempotent seed, then serves on $PORT.
+RUN chmod +x start.sh     && useradd --create-home appuser     && chown -R appuser:appuser /app
+USER appuser
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 8000
+CMD ["bash", "start.sh"]

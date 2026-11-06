@@ -67,6 +67,18 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _normalise_database_url(cls, value: object) -> object:
+        """Accept hosted-provider URLs: Render/Heroku hand out postgres://
+        (and sometimes postgresql://), while the app speaks
+        postgresql+psycopg:// to pin the psycopg3 driver."""
+        if isinstance(value, str) and value.startswith(("postgres://", "postgresql://")):
+            return value.replace("postgres://", "postgresql+psycopg://", 1).replace(
+                "postgresql://", "postgresql+psycopg://", 1
+            )
+        return value
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
