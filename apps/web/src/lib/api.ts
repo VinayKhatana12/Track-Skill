@@ -650,3 +650,29 @@ export interface GapReportRow {
   missing_in_demand_skills: { skill: string; demand_score: number }[];
   suggested_modules: string[];
 }
+
+// ── Web push (Phase 10) ──────────────────────────────────────────────────────
+
+export interface PushSubscriptionPayload {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  user_agent: string;
+}
+
+/** VAPID public key the browser needs to create a push subscription. */
+export async function fetchPushPublicKey(): Promise<string> {
+  return api.get<{ public_key: string }>("/push/public-key").then((data) => data.public_key);
+}
+
+export function savePushSubscription(subscription: PushSubscriptionPayload): Promise<{ status: string }> {
+  return api.post("/push/subscriptions", subscription);
+}
+
+export function deletePushSubscription(endpoint: string): Promise<{ status: string }> {
+  return api.post("/push/subscriptions/delete", { endpoint });
+}
+
+/** Ask the API to send a test notification to all of my devices. */
+export function sendTestPush(): Promise<{ sent: number; failed: number; pruned: number }> {
+  return api.post("/push/test");
+}

@@ -26,6 +26,7 @@ EXPECTED_TABLES = {
     "events",
     "notifications",
     "contact_messages",
+    "push_subscriptions",
 }
 
 

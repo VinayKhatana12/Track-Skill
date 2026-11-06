@@ -10,6 +10,7 @@ from app.models.employment import EmploymentRecord, Verification
 from app.models.followup import FollowUp
 from app.models.governance import FundAllocation, ProviderScore
 from app.models.market import MarketDemand
+from app.models.push import PushSubscription
 from app.models.trainee import Consent, Trainee
 from app.models.user import User
 
@@ -27,6 +28,7 @@ __all__ = [
     "Notification",
     "ProviderScore",
     "ProviderStaff",
+    "PushSubscription",
     "TimestampMixin",
     "Trainee",
     "TrainingCentre",

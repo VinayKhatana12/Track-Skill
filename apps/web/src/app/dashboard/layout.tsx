@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
+import { PullToRefresh } from "@/components/pwa/pull-to-refresh";
 import { useRealtimeConnection } from "@/hooks/use-realtime-connection";
 import { useAuthStore } from "@/stores/auth-store";
 import { useRealtimeStore } from "@/stores/realtime-store";
@@ -53,5 +54,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     );
   }
 
-  return <>{children}</>;
+  return (
+    <PullToRefresh>
+      {children}
+    </PullToRefresh>
+  );
 }

@@ -151,8 +151,9 @@ export function DashboardShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* Top bar */}
-        <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur">
+        {/* Top bar — its own safe-area top padding so the translucent iOS
+            status bar in standalone mode never covers the controls. */}
+        <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 pt-[env(safe-area-inset-top)] backdrop-blur">
           <div className="flex h-16 items-center gap-3 px-4">
             <button
               type="button"
@@ -202,17 +203,17 @@ export function DashboardShell({
         </main>
       </div>
 
-      {/* Mobile bottom tabs */}
+      {/* Mobile bottom tabs — sized above the home-bar safe area */}
       <nav
         aria-label="Dashboard sections"
-        className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-4 border-t border-border bg-background md:hidden"
+        className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-4 border-t border-border bg-background pb-[env(safe-area-inset-bottom)] md:hidden"
       >
         {sections.map((section) => (
           <button
             key={section.id}
             type="button"
             onClick={() => mobileNavigate(section.id)}
-            className="flex flex-col items-center gap-0.5 py-2.5 text-[10px] text-muted-foreground hover:text-foreground"
+            className="flex min-h-[52px] flex-col items-center justify-center gap-0.5 py-2 text-[10px] text-muted-foreground hover:text-foreground"
           >
             <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-marigold-400" />
             {section.label}

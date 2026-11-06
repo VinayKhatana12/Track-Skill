@@ -17,6 +17,7 @@ from app.routers import (
     health,
     notifications,
     provider,
+    push,
     search,
     trainee,
     trainees,
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
     application.include_router(auth.router)
     application.include_router(contact.router)
     application.include_router(notifications.router)
+    application.include_router(push.router)
     application.include_router(search.router)
     application.include_router(trainees.router)
     application.include_router(provider.router)

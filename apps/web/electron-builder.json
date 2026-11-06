@@ -1,0 +1,18 @@
+{
+  "appId": "in.trackskill.app",
+  "productName": "TrackSkill AI",
+  "directories": {
+    "output": "dist-desktop"
+  },
+  "files": ["electron/**"],
+  "extraMetadata": {
+    "main": "electron/main.cjs"
+  },
+  "win": {
+    "target": "nsis"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  }
+}

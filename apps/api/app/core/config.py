@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     login_max_attempts: int = 5
     login_window_seconds: int = 300
 
+    # Web Push (Phase 10): VAPID identity. Both keys may be omitted — a P-256
+    # pair is then generated once and stored in vapid_keys_file so local demo
+    # runs need zero configuration. Provide real keys in production:
+    #   python -m app.core.vapid
+    vapid_private_key: str | None = None
+    vapid_public_key: str | None = None
+    vapid_keys_file: str = "vapid-keys.json"
+    push_subject: str = "mailto:demo@trackskill.in"
+
     # CORS — NoDecode keeps pydantic-settings from JSON-parsing the raw env
     # string so the comma-split validator below can handle it.
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:3000"]

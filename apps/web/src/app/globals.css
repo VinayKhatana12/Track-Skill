@@ -114,3 +114,36 @@
     width: 100%;
   }
 }
+
+/* ── PWA native feel (Phase 10) ─────────────────────────────────────────── */
+
+/* Safe-area insets for notches and home bars (viewport-fit=cover). */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Standalone windows have no browser chrome; the shell handles its own
+ * safe-area padding (top bar + bottom tabs), and we stop the browser's own
+ * pull-to-refresh from fighting our custom indicator. */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  body {
+    overscroll-behavior-y: contain;
+  }
+}
+
+/* Haptic-friendly touch targets: interactive controls are at least 44px
+ * tall/wide on coarse pointers (phones). Inline text links are unaffected
+ * (min-height does not apply to inline boxes); opt out of a specific control
+ * with data-touch-none="". */
+@media (pointer: coarse) {
+  button:not([data-touch-none]),
+  [role="button"]:not([data-touch-none]),
+  a[href]:not([data-touch-none]) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+

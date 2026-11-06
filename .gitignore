@@ -34,3 +34,6 @@ Thumbs.db
 # Local demo database cluster (Windows)
 ../local-dev/
 local-dev/
+
+# VAPID keys (auto-generated local Web Push identity)
+vapid-keys.json

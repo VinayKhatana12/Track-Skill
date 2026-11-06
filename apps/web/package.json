@@ -12,7 +12,9 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "desktop": "electron electron/main.cjs",
+    "desktop:build": "electron-builder --config electron-builder.json --win --publish never"
   },
   "dependencies": {
     "@hookform/resolvers": "^7.0.1",
