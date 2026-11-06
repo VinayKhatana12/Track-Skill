@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.models.enums import FollowUpMilestone, FollowUpState, TraineeStatus, VerificationSignal
 from app.services import ppi
+from app.services.privacy import audit_read, mask_email, mask_phone
 from app.services.realtime import NotificationDraft, publish_event
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,10 @@ def own_employer(db: Session, user_id: UUID) -> Employer:
 
 
 def pending_verifications(db: Session, employer: Employer) -> list[dict]:
+    # Reading trainee-submitted claims is a sensitive cross-role read.
+    employer_user = db.get(User, employer.user_id)
+    if employer_user is not None:
+        audit_read(db, reader=employer_user, kind="verification_queue")
     rows = db.execute(
         select(Verification, EmploymentRecord, Trainee, User)
         .join(EmploymentRecord, Verification.employment_record_id == EmploymentRecord.id)
@@ -281,12 +286,22 @@ def talent_pool(
     employer: Employer,
     skill_filter: str | None = None,
     district_filter: str | None = None,
+    *,
+    employer_user: User | None = None,
 ) -> list[dict]:
     """Certified trainees with active consent, grouped by their skills.
 
     match_score blends the market demand for the skill with embedding
     similarity when a search term is given (light-NLP mode keeps it lexical).
     """
+    if employer_user is None:
+        employer_user = db.get(User, employer.user_id)
+    audit_read(
+        db,
+        reader=employer_user,
+        kind="talent_pool",
+        detail={"skill": skill_filter, "district": district_filter},
+    )
     rows = db.execute(
         select(Trainee, User, Course)
         .join(User, Trainee.user_id == User.id)
@@ -312,12 +327,17 @@ def talent_pool(
                 continue
             entry = pool.setdefault(
                 skill,
-                {"count": 0, "districts": set(), "names": []},
+                {"count": 0, "districts": set(), "names": [], "contacts": []},
             )
             entry["count"] += 1
             entry["districts"].add(trainee.district)
             if len(entry["names"]) < 3:
                 entry["names"].append(user.name)
+                # Field-level masking: employers browsing the pool see masked
+                # contact details — outreach stays inside the platform.
+                entry["contacts"].append(
+                    {"email": mask_email(user.email), "phone": mask_phone(trainee.phone)}
+                )
 
     from app.ai.embedder import cosine, get_embedder
 
@@ -346,6 +366,7 @@ def talent_pool(
                 "trainee_count": entry["count"],
                 "districts": sorted(entry["districts"]),
                 "trainee_names": entry["names"],
+                "contacts": entry["contacts"],
                 "match_score": round(min(1.0, match), 2),
             }
         )
@@ -399,6 +420,7 @@ def impact(db: Session, employer: Employer) -> dict:
     avg_wage = round(sum(wages) / len(wages), 2) if wages else 0.0
 
     return {
+        "employer_id": str(employer.id),
         "hires": len(records),
         "verified_hires": verified_count,
         "working": len(working),

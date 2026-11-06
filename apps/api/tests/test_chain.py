@@ -30,6 +30,7 @@ from app.models import (
     Verification,
 )
 from app.models.enums import FollowUpMilestone, VerificationSignal
+from app.services import ppi
 from app.services.ppi import current_period
 
 DEMO_PASSWORD = "Demo@1234"
@@ -177,7 +178,11 @@ def test_flagship_realtime_chain(client: TestClient, db_session) -> None:
                     ProviderScore.centre_id == centre_id, ProviderScore.period == period
                 )
             ).scalar_one()
-            ppi_before = score_row.ppi_score
+            # Fresh computation, not the stored row: the demo row can lag
+            # the drifted database and coincide with post-confirm values.
+            verification_rate_before = ppi.compute_metrics(db_session, centre_id)[
+                "verification_rate"
+            ]
 
             # ── 6. Employer confirms -> verification complete -> PPI moves ──
             confirm = client.post(
@@ -205,7 +210,12 @@ def test_flagship_realtime_chain(client: TestClient, db_session) -> None:
                     ProviderScore.centre_id == centre_id, ProviderScore.period == period
                 )
             ).scalar_one()
-            assert score_row.ppi_score != ppi_before
+            # Recalculation happened: the stored row matches a fresh
+            # recomputation of the centre (a stale row would lag the confirm).
+            # One more confirmation may not move the 2-dp score in a drifted
+            # demo database, so the components are the ground truth.
+            assert score_row.ppi_score == ppi.compute_metrics(db_session, centre_id)["ppi_score"]
+            assert score_row.verification_rate != verification_rate_before
 
             # ── 7. Admin allocates funds -> provider notified live ──────────
             allocation = client.post(

@@ -361,6 +361,11 @@ function TalentPoolCard() {
                   <p className="text-xs text-muted-foreground">
                     {row.districts.join(", ")} · {row.trainee_names.join(", ")}
                   </p>
+                  {row.contacts?.length > 0 && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Contact (masked): {row.contacts.map((c) => c.email).join(" · ")}
+                    </p>
+                  )}
                 </div>
                 <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs font-semibold text-secondary-foreground">
                   {row.trainee_count} · match {row.match_score.toFixed(2)}

@@ -1,12 +1,13 @@
 """Public landing-page contact endpoint."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.models import ContactMessage
 from app.schemas.contact import ContactRequest
+from app.services.rate_limit import contact_limiter, enforce_rate_limit
 from app.services.realtime import publish_event
 
 router = APIRouter(tags=["contact"])
@@ -14,9 +15,14 @@ router = APIRouter(tags=["contact"])
 
 @router.post("/contact", status_code=201, summary="Submit a contact enquiry")
 async def submit_contact(
-    payload: ContactRequest, db: Session = Depends(get_db)
+    payload: ContactRequest,
+    request: Request,
+    db: Session = Depends(get_db),
 ) -> dict:
     """Public endpoint: stores the enquiry and notifies admins live."""
+    enforce_rate_limit(
+        contact_limiter, request, max_attempts=5, window_seconds=600, scope="contact"
+    )
     message = ContactMessage(
         name=payload.name.strip(),
         email=payload.email.strip().lower(),

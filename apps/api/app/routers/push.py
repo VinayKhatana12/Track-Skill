@@ -3,7 +3,7 @@ and a test send so the demo can prove delivery end to end."""
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,6 +14,7 @@ from app.dependencies import require_role
 from app.models.push import PushSubscription
 from app.models.user import User
 from app.services.push_service import send_to_user_sync
+from app.services.rate_limit import enforce_rate_limit, push_limiter
 
 router = APIRouter(prefix="/push", tags=["push"])
 
@@ -87,9 +88,13 @@ def unsubscribe(
 
 @router.post("/test", summary="Send a test push to all my devices")
 def test_push(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role()),
 ) -> dict:
+    enforce_rate_limit(
+        push_limiter, request, max_attempts=5, window_seconds=60, scope="push-test"
+    )
     result = send_to_user_sync(
         db,
         current_user.id,

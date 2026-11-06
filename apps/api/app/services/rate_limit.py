@@ -1,8 +1,10 @@
-"""In-memory sliding-window rate limiting for the login endpoint."""
+"""In-memory sliding-window rate limiting (login, contact, resets, push test)."""
 
 import threading
 import time
 from collections import defaultdict, deque
+
+from fastapi import HTTPException, Request, status
 
 
 class SlidingWindowRateLimiter:
@@ -36,4 +38,32 @@ class SlidingWindowRateLimiter:
             self._hits.clear()
 
 
+def enforce_rate_limit(
+    limiter: SlidingWindowRateLimiter,
+    request: Request,
+    *,
+    max_attempts: int,
+    window_seconds: int,
+    scope: str,
+) -> None:
+    """Raise 429 when this client exceeded the budget for ``scope``.
+
+    Keys combine scope, client IP and (when present) the email/body identity
+    so one abusive mailbox cannot lock out everyone behind an office NAT.
+    Callers call ``limiter.record(key)`` only after the action succeeded.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    key = f"{scope}:{client_ip}"
+    if not limiter.has_capacity(key, max_attempts, window_seconds):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests — please slow down and retry later.",
+            headers={"Retry-After": "60"},
+        )
+    limiter.record(key)
+
+
 login_limiter = SlidingWindowRateLimiter()
+contact_limiter = SlidingWindowRateLimiter()
+reset_limiter = SlidingWindowRateLimiter()
+push_limiter = SlidingWindowRateLimiter()

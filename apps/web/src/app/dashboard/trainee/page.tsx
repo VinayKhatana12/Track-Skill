@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCheck,
+  Download,
   GraduationCap,
   Loader2,
   MapPin,
@@ -29,7 +30,8 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePulse } from "@/hooks/use-pulse";
 import { DashboardShell } from "@/components/dashboard/app-shell";
-import { api, assessSkills } from "@/lib/api";
+import { api, assessSkills, deleteMyData, exportMyData } from "@/lib/api";
+import { useAuthStore } from "@/stores/auth-store";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@/types/api";
 
@@ -202,7 +204,117 @@ function TraineeContent({ me }: { me: MeResponse }) {
       <section id="skills" aria-label="AI skills" className="scroll-mt-24">
         <SkillsCard />
       </section>
+
+      <section id="privacy" aria-label="Your data rights" className="scroll-mt-24">
+        <DataRightsCard />
+      </section>
     </>
+  );
+}
+
+function DataRightsCard() {
+  const queryClient = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const signOut = useAuthStore((state) => state.signOut);
+
+  const exportMutation = useMutation({
+    mutationFn: async () => {
+      const data = await exportMyData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = "trackskill-my-data.json";
+      anchor.click();
+      URL.revokeObjectURL(url);
+    },
+    onSuccess: () => setNotice("Export downloaded — check your files."),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteMyData,
+    onSuccess: async () => {
+      setNotice(null);
+      queryClient.clear();
+      await signOut();
+    },
+  });
+
+  return (
+    <PulseCard pulsing={false}>
+      <Card>
+        <CardHeader>
+          <CardTitle className="font-display text-xl">Your data rights</CardTitle>
+          <CardDescription>
+            You own your record. Export everything stored about you, or erase it
+            for good — revoking consent already stops all tracing immediately.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {notice && (
+            <p role="status" className="text-sm text-primary">
+              {notice}
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => exportMutation.mutate()}
+              disabled={exportMutation.isPending}
+            >
+              {exportMutation.isPending && (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              )}
+              <Download className="h-4 w-4" aria-hidden />
+              Export my data
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => setConfirming(true)}
+              disabled={deleteMutation.isPending}
+            >
+              Delete my data
+            </Button>
+          </div>
+          {confirming && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Confirm deletion"
+              className="rounded-md border border-destructive/40 bg-destructive/5 p-3"
+            >
+              <p className="text-sm font-medium">
+                Erase your account permanently?
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                This removes your profile, consents, tracer messages, employment
+                claims and notifications. Audit logs stay — without your name
+                attached. This cannot be undone.
+              </p>
+              <div className="mt-3 flex gap-2">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => deleteMutation.mutate()}
+                  disabled={deleteMutation.isPending}
+                >
+                  {deleteMutation.isPending && (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  )}
+                  Yes, erase everything
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setConfirming(false)}>
+                  Keep my data
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </PulseCard>
   );
 }
 

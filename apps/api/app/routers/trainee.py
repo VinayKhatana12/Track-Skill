@@ -2,11 +2,13 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.ai import skill_assessment
 from app.core.db import get_db
+from app.core.security import clear_refresh_cookie
 from app.dependencies import require_role
 from app.models import Course, User
 from app.models.enums import UserRole
@@ -17,6 +19,7 @@ from app.schemas.domain import (
     SkillsAssessmentRequest,
 )
 from app.services import tracer_service, trainee_service
+from app.services.rate_limit import enforce_rate_limit, reset_limiter
 
 router = APIRouter(prefix="/trainee", tags=["Trainee"])
 
@@ -106,3 +109,42 @@ def skills(
 ) -> dict:
     trainee = trainee_service.own_trainee(db, current_user.id)
     return trainee_service.skills_view(db, trainee)
+
+
+
+@router.get("/me/export", summary="Download everything the platform stores about me")
+def export_data(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.TRAINEE)),
+) -> dict:
+    """DPDP-aligned data access right: one JSON document, own data only."""
+    trainee = trainee_service.own_trainee(db, current_user.id)
+    return trainee_service.export_my_data(db, trainee=trainee)
+
+
+class DeleteAccountRequest(BaseModel):
+    confirm: bool
+
+
+@router.post("/me/delete", summary="Erase my account and all personal data")
+async def delete_data(
+    payload: DeleteAccountRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.TRAINEE)),
+) -> dict:
+    """DPDP-aligned erasure right. Requires explicit {"confirm": true};
+    clears the refresh cookie so the session ends immediately."""
+    enforce_rate_limit(
+        reset_limiter, request, max_attempts=5, window_seconds=600, scope="delete-account"
+    )
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail='Send {"confirm": true} to permanently erase your data.',
+        )
+    trainee = trainee_service.own_trainee(db, current_user.id)
+    result = await trainee_service.delete_my_data(db, trainee=trainee, user=current_user)
+    clear_refresh_cookie(response)
+    return result

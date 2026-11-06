@@ -1,4 +1,10 @@
-"""Role-aware global search for the top bar."""
+"""Role-aware global search for the top bar.
+
+Hardened in Phase 11: provider searches are scoped to the centres they staff
+(a provider must never see trainees of other centres), and every trainee
+contact field crossing a role boundary is masked (email here; the provider
+roster keeps owner-scoped detail).
+"""
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import or_, select
@@ -6,8 +12,9 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.dependencies import require_role
-from app.models import Course, Trainee, TrainingCentre, User
+from app.models import Course, ProviderStaff, Trainee, TrainingCentre, User
 from app.models.enums import UserRole
+from app.services.privacy import audit_read, mask_email
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -22,15 +29,27 @@ def search(
     results: list[dict] = []
 
     if current_user.role in (UserRole.ADMIN, UserRole.PROVIDER):
-        trainees = db.execute(
+        query = (
             select(Trainee, User)
             .join(User, Trainee.user_id == User.id)
             .where(or_(User.name.ilike(needle), User.email.ilike(needle)))
-            .limit(5)
-        ).all()
+        )
+        if current_user.role is UserRole.PROVIDER:
+            centre_ids = select(ProviderStaff.centre_id).where(
+                ProviderStaff.user_id == current_user.id
+            )
+            query = query.where(Trainee.centre_id.in_(centre_ids))
+        trainees = db.execute(query.limit(5)).all()
+        if trainees:
+            audit_read(
+                db,
+                reader=current_user,
+                kind="trainee_search",
+                detail={"query_length": len(q.strip()), "matches": len(trainees)},
+            )
         for _, user in trainees:
             results.append(
-                {"type": "trainee", "label": user.name, "detail": user.email}
+                {"type": "trainee", "label": user.name, "detail": mask_email(user.email)}
             )
     if current_user.role is UserRole.ADMIN:
         centres = db.execute(

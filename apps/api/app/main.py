@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
@@ -91,6 +91,34 @@ def create_app() -> FastAPI:
         docs_url="/docs",
         openapi_url="/openapi.json",
     )
+
+    async def secure_headers(request: Request, call_next):
+        """OWASP secure headers on every response (Phase 11).
+
+        The API serves only JSON, so its CSP pins to 'none'; the browser app
+        sets its own policy in next.config.mjs. HSTS is emitted in production
+        (HTTPS) environments only — on plain-http local runs it is meaningless
+        and would linger in cached responses.
+        """
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=(), payment=()"
+        )
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        )
+        if settings.environment == "production":
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
+        return response
+
+    application.middleware("http")(secure_headers)
+
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

@@ -248,6 +248,60 @@ Optional git hooks: `pip install pre-commit && pre-commit install`.
 - Warm paper surfaces; **Space Grotesk** display + **Public Sans** body via `next/font`.
 - Tokens live in `apps/web/src/lib/design-tokens.ts` and as CSS variables in `src/app/globals.css` (light/dark, WCAG AA).
 
+## Privacy and data protection (DPDP-aligned design intent)
+
+> **Design intent, not legal advice.** The product is built to make an
+> independent India DPDP Act 2023 compliance review straightforward; it does
+> not assert compliance. Rule-check with your DPO and counsel before any real
+> deployment.
+
+**Consent-first tracing.** No tracer is scheduled or sent without a recorded,
+version-stamped consent grant (purpose text + version `1.0` on every row).
+Revoking consent cancels every un-happened tracer immediately — the scheduler
+also re-checks consent before each send, and revoked trainees disappear from
+the employer talent pool at once.
+
+**Purpose limitation.** Personal data serves exactly three purposes, stated at
+consent time: milestone outcome tracing, verification of the trainee's own
+employment claim, and program governance analytics (aggregates).
+
+**Data minimisation.** The schema stores what the milestone outcome needs —
+contact channel, employment status, job title, wage band, district — and
+nothing else: no demographic proxies, no location tracking, no message content
+beyond the tracer replies the trainee chose to send. Phone numbers never
+cross role boundaries: they stay with the trainee (owner) and their centre's
+provider staff; where contact details must appear to other roles they are
+masked at the field level (`+91 ••••••5678`, `me••••••••@example.com`) in
+`app/services/privacy.py`.
+
+**Data subject rights (in product).** A signed-in trainee can export
+everything stored about them (`GET /trainee/me/export` — one JSON document)
+and erase their account (`POST /trainee/me/delete`, explicit
+`{"confirm": true}`): profile, consents, tracers, employment claims and
+notifications are deleted in the same transaction; audit events survive with
+the actor reference nulled, so the trail stays complete without personal
+data. Erasure is itself audited (`TRAINEE_DATA_DELETED`) for admins.
+
+**Auditability.** Every mutation publishes an append-only audit event; every
+sensitive cross-role read (talent pool, verification queue, trainee search)
+writes a `READ_AUDIT` event with the reader, kind and filters.
+
+**Security measures.** Argon-grade password hashing (bcrypt), short-lived JWT
+access tokens (15 min) with rotating httpOnly refresh cookies (SameSite=Lax,
+Path=/auth, cross-origin refresh rejected), RBAC enforced server-side on
+every route, rate limiting on login/contact/reset/push-test, OWASP secure
+headers (CSP, nosniff, frame-deny, referrer policy; HSTS in production), and
+parameterised ORM queries only — no string-built SQL anywhere.
+
+**Retention.** Tracer records and audit events are the accountability
+backbone and are retained; everything personal can be erased by the trainee
+or removed by admin demo reset in demo mode. A production deployment must add
+a documented retention schedule per DPDP.
+
+**Grievance and breach intent.** The contact endpoint routes questions to
+admins; a production deployment must add a grievance officer identity and a
+72-hour breach-notification runbook.
+
 ## Roadmap
 
 | Phase | Scope | Status |
@@ -260,7 +314,10 @@ Optional git hooks: `pip install pre-commit && pre-commit install`.
 | 5 | Simulated WhatsApp/IVR tracer service, scheduler, adapters, Messages panel, demo run-now | ✅ |
 | 6 | Frontend dashboards consuming the APIs (provider console, tracer, verification queue, governance) | Planned |
 | 7 | sentence-transformers semantic upgrade (behind USE_LIGHT_NLP) + governance screens | Planned |
-| 8 | PWA (installable, icon, splash, offline shell), realtime hardening | Planned |
+| 8 | Auth screens polish, onboarding tour, consent versioning | Planned |
+| 9 | Authenticated app shell + four realtime role dashboards, CSV/PDF exports | ✅ |
+| 10 | Installable PWA: manifest + shortcuts, service worker (offline shell, data cache, background sync), Web Push (VAPID), native-feel, Capacitor/Electron wrappers | ✅ |
+| 11 | Hardening: OWASP secure headers, rate limits, read audits, field masking, consent revocation guarantees, data rights (export/erase), DPDP-aligned privacy notes, pytest-cov ≥ 80%, Vitest, Playwright 4-role E2E, GitHub Actions CI | ✅ |
 
 ## Known limitations (Phase 6)
 

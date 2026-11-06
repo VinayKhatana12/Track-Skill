@@ -79,7 +79,9 @@ def talent_pool(
     current_user: User = Depends(require_role(UserRole.EMPLOYER)),
 ) -> list[dict]:
     employer = employer_service.own_employer(db, current_user.id)
-    return employer_service.talent_pool(db, employer, skill, district)
+    return employer_service.talent_pool(
+        db, employer, skill, district, employer_user=current_user
+    )
 
 
 @router.get("/impact", summary="Retention and verification stats for your hires")

@@ -30,6 +30,7 @@ const ROLE_NAV: Record<UserRole, { id: string; label: string }[]> = {
     { id: "consent", label: "Consent" },
     { id: "messages", label: "Messages" },
     { id: "skills", label: "Skills" },
+    { id: "privacy", label: "Your data" },
   ],
   EMPLOYER: [
     { id: "verify", label: "Verify" },

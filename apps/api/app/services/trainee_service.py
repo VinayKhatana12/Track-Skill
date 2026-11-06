@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.ai import skills as ai_skills
@@ -21,8 +21,11 @@ from app.models import (
     Course,
     Employer,
     EmploymentRecord,
+    Event,
     FollowUp,
+    Notification,
     ProviderStaff,
+    PushSubscription,
     Trainee,
     TrainingCentre,
     User,
@@ -614,3 +617,183 @@ async def _record_manual_review_response(
         "confidence": parsed.confidence,
         "parsed": parsed.to_dict(),
     }
+
+
+# ── Data rights (Phase 11): export and erasure ───────────────────────────────
+
+
+def export_my_data(db: Session, *, trainee: Trainee) -> dict:
+    """Machine-readable copy of everything the platform stores about me.
+
+    DPDP-aligned data access right: the export is the trainee's own record —
+    profile, consents (including revoked ones), tracer messages, employment
+    claims, notifications and the audit events they triggered. Written for
+    transparency, not for re-import.
+    """
+    user = db.get(User, trainee.user_id)
+    followups = db.execute(
+        select(FollowUp).where(FollowUp.trainee_id == trainee.id).order_by(FollowUp.due_on)
+    ).scalars().all()
+    consents = db.execute(
+        select(Consent).where(Consent.trainee_id == trainee.id).order_by(Consent.created_at)
+    ).scalars().all()
+    employment = db.execute(
+        select(EmploymentRecord).where(EmploymentRecord.trainee_id == trainee.id)
+    ).scalars().all()
+    verifications = db.execute(
+        select(Verification).join(
+            EmploymentRecord, Verification.employment_record_id == EmploymentRecord.id
+        ).where(EmploymentRecord.trainee_id == trainee.id)
+    ).scalars().all()
+    notifications = db.execute(
+        select(Notification).where(Notification.user_id == trainee.user_id)
+    ).scalars().all()
+    read_events = db.execute(
+        select(Event).where(
+            Event.type == "READ_AUDIT",
+            Event.actor_user_id == trainee.user_id,
+        )
+    ).scalars().all()
+
+    return {
+        "exported_at": datetime.now(UTC).isoformat(),
+        "profile": {
+            "name": user.name if user else None,
+            "email": user.email if user else None,
+            "phone": trainee.phone,
+            "district": trainee.district,
+            "gender": trainee.gender,
+            "enrolled_on": trainee.enrolled_on.isoformat(),
+            "certified_on": trainee.certified_on.isoformat() if trainee.certified_on else None,
+            "status": trainee.status.value,
+        },
+        "consents": [
+            {
+                "channel": consent.channel.value,
+                "granted": consent.granted,
+                "granted_at": consent.granted_at.isoformat() if consent.granted_at else None,
+                "revoked_at": consent.revoked_at.isoformat() if consent.revoked_at else None,
+                "version": consent.version,
+                "purpose": consent.purpose_text,
+            }
+            for consent in consents
+        ],
+        "tracers": [
+            {
+                "milestone": followup.milestone.value,
+                "channel": followup.channel.value,
+                "state": followup.state.value,
+                "due_on": followup.due_on.isoformat(),
+                "attempts": followup.attempts,
+                "sent_at": followup.sent_at.isoformat() if followup.sent_at else None,
+                "response": followup.response_json,
+            }
+            for followup in followups
+        ],
+        "employment_records": [
+            {
+                "job_title": record.job_title,
+                "monthly_wage": record.monthly_wage,
+                "started_on": record.started_on.isoformat() if record.started_on else None,
+                "ended_on": record.ended_on.isoformat() if record.ended_on else None,
+                "employer_id": str(record.employer_id) if record.employer_id else None,
+            }
+            for record in employment
+        ],
+        "verifications": [
+            {
+                "trainee_signal": verification.trainee_signal.value,
+                "employer_signal": verification.employer_signal.value,
+                "verified": verification.verified,
+            }
+            for verification in verifications
+        ],
+        "notifications": [
+            {"title": item.title, "body": item.body, "read": item.read}
+            for item in notifications
+        ],
+        "audit_events_about_me": [
+            {"type": event.type, "at": event.created_at.isoformat() if event.created_at else None}
+            for event in read_events
+        ],
+    }
+
+
+async def delete_my_data(db: Session, *, trainee: Trainee, user: User) -> dict:
+    """Erase the account: profile, consents, tracers, claims, notifications.
+
+    DPDP-aligned erasure right. Database foreign keys cascade the deletion of
+    every child row; audit ``events`` rows survive with the actor reference
+    nulled (SET NULL) so the audit trail stays complete without holding
+    personal data. The erasure itself is audited BEFORE the rows go away.
+    """
+    counts = {
+        "consents": 0,
+        "tracers": 0,
+        "employment_records": 0,
+        "notifications": 0,
+        "push_subscriptions": 0,
+    }
+    counts["consents"] = len(
+        db.execute(select(Consent).where(Consent.trainee_id == trainee.id)).scalars().all()
+    )
+    counts["tracers"] = len(
+        db.execute(select(FollowUp).where(FollowUp.trainee_id == trainee.id)).scalars().all()
+    )
+    counts["employment_records"] = len(
+        db.execute(
+            select(EmploymentRecord).where(EmploymentRecord.trainee_id == trainee.id)
+        ).scalars().all()
+    )
+    counts["notifications"] = len(
+        db.execute(
+            select(Notification).where(Notification.user_id == trainee.user_id)
+        ).scalars().all()
+    )
+    counts["push_subscriptions"] = len(
+        db.execute(
+            select(PushSubscription).where(PushSubscription.user_id == trainee.user_id)
+        ).scalars().all()
+    )
+
+    await_publish = {
+        "trainee_id": str(trainee.id),
+        "erased_counts": counts,
+    }
+
+    # Delete children explicitly in dependency order (cascades exist, but an
+    # explicit sweep keeps the counts honest and works across backends).
+    db.execute(delete(PushSubscription).where(PushSubscription.user_id == trainee.user_id))
+    db.execute(delete(Notification).where(Notification.user_id == trainee.user_id))
+    verifications = db.execute(
+        select(Verification.id).join(
+            EmploymentRecord, Verification.employment_record_id == EmploymentRecord.id
+        ).where(EmploymentRecord.trainee_id == trainee.id)
+    ).scalars().all()
+    if verifications:
+        db.execute(delete(Verification).where(Verification.id.in_(verifications)))
+    db.execute(
+        delete(EmploymentRecord).where(EmploymentRecord.trainee_id == trainee.id)
+    )
+    db.execute(delete(FollowUp).where(FollowUp.trainee_id == trainee.id))
+    db.execute(delete(Consent).where(Consent.trainee_id == trainee.id))
+
+    # Audit BEFORE the identity disappears: actor id survives this commit only.
+    await publish_event(
+        db,
+        event_type="TRAINEE_DATA_DELETED",
+        actor_user_id=user.id,
+        actor_role="TRAINEE",
+        payload=await_publish,
+        audience_roles=["ADMIN"],
+    )
+
+    trainee_ref = trainee.id
+    user_email = user.email
+    db.delete(trainee)
+    db.delete(user)
+    db.flush()
+    logger.info(
+        "Erased trainee %s (%s): %s", trainee_ref, user_email, counts
+    )
+    return {"status": "deleted", "erased": counts, "trainee_id": str(trainee_ref)}

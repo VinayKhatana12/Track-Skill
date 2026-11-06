@@ -9,7 +9,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.core.security import create_access_token, create_refresh_token, decode_token
+from app.core.security import (
+    clear_refresh_cookie,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    set_refresh_cookie,
+)
 from app.dependencies import require_role
 from app.models import Trainee, User
 from app.models.enums import UserRole
@@ -32,7 +38,7 @@ from app.services.auth_service import (
     register_user,
     reset_password_with_token,
 )
-from app.services.rate_limit import login_limiter
+from app.services.rate_limit import enforce_rate_limit, login_limiter, reset_limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -41,27 +47,11 @@ SELF_SIGNUP_ROLES = (UserRole.TRAINEE, UserRole.EMPLOYER)
 
 
 def _set_refresh_cookie(response: Response, token: str) -> None:
-    settings = get_settings()
-    response.set_cookie(
-        key=REFRESH_COOKIE,
-        value=token,
-        max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
-        httponly=True,
-        secure=settings.cookie_secure,
-        samesite=settings.cookie_samesite,
-        path="/auth",
-    )
+    set_refresh_cookie(response, token)
 
 
 def _clear_refresh_cookie(response: Response) -> None:
-    settings = get_settings()
-    response.delete_cookie(
-        key=REFRESH_COOKIE,
-        path="/auth",
-        httponly=True,
-        secure=settings.cookie_secure,
-        samesite=settings.cookie_samesite,
-    )
+    clear_refresh_cookie(response)
 
 
 def _token_response(user: User) -> TokenResponse:
@@ -173,8 +163,18 @@ def login(
 def refresh(request: Request, response: Response, db: Session = Depends(get_db)) -> TokenResponse:
     """Exchange the httpOnly refresh cookie for a fresh access token.
 
-    The refresh token is rotated on every use.
+    The refresh token is rotated on every use. CSRF: the cookie is
+    SameSite=Lax and Path-scoped to /auth; as defense in depth a request that
+    carries a cross-origin Origin header is rejected outright.
     """
+    origin = request.headers.get("origin")
+    if origin:
+        allowed = {value.rstrip("/") for value in get_settings().cors_origins}
+        if origin.rstrip("/") not in allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Cross-origin refresh requests are not allowed.",
+            )
     token = request.cookies.get(REFRESH_COOKIE)
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated.")
@@ -209,10 +209,14 @@ def logout(response: Response) -> dict[str, str]:
 @router.post("/forgot-password", summary="Request a password reset")
 def forgot_password(
     payload: ForgotPasswordRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> dict:
     """Always responds generically. In DEMO_MODE the response includes the
     reset link so the flow works without an email gateway."""
+    enforce_rate_limit(
+        reset_limiter, request, max_attempts=5, window_seconds=600, scope="forgot"
+    )
     settings = get_settings()
     response: dict = {
         "status": "ok",

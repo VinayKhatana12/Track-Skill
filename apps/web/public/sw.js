@@ -6,10 +6,11 @@
  *   response is cached; offline falls back to the cached page or /offline.
  * - Static assets (/_next/static, icons, splash, manifest): cache-first.
  * - Other same-origin GETs (RSC flights, prefetches): stale-while-revalidate.
- * - API GETs (the FastAPI origin): stale-while-revalidate with a 30-second
- *   freshness window — young entries are served from cache instantly while a
- *   background fetch refreshes them; older entries try the network first so
- *   dashboards stay live, falling back to cache when offline.
+ * - API GETs (the FastAPI origin): network-first with a 3-second budget,
+ *   falling back to the cached copy when offline or slow (Phase 11 change:
+ *   plain stale-while-revalidate served ≤30s-old data to realtime-triggered
+ *   refetches, which blocked live dashboard updates — freshness outranks
+ *   latency for a governance product, and offline still works via fallback).
  * - Auth endpoints (/auth/*): never cached — login/refresh always hit the
  *   network so credentials can never be served from a stale copy.
  * - Offline follow-up responses: POSTs to /trainee/followups/{id}/respond are
@@ -20,13 +21,13 @@
  * updates by byte-diff of this file and the page shows "Refresh to update".
  */
 
-const VERSION = "trackskill-v1";
+const VERSION = "trackskill-v2";
 const PAGES_CACHE = `pages-${VERSION}`;
 const STATIC_CACHE = `static-${VERSION}`;
 const API_CACHE = `api-${VERSION}`;
 const PAGES_CAP = 20;
 const API_CAP = 150;
-const API_FRESH_MS = 30_000;
+const API_TIMEOUT_MS = 3_000;
 
 const PRECACHE_URLS = [
   "/offline",
@@ -177,6 +178,35 @@ function staleWhileRevalidate(request, cacheName, cap, freshMs) {
   return { respond, revalidate };
 }
 
+/** Network-first with a short budget: live data wins; offline or slow
+ * networks fall back to the cached copy (Workbox NetworkFirst equivalent).
+ * If the timeout wins the race, the network result still lands in the cache
+ * via `network`. */
+function networkFirst(request, cacheName, cap, timeoutMs) {
+  const network = fetch(request)
+    .then(async (response) => {
+      if (cacheable(response)) {
+        await putCapped(cacheName, request, response.clone(), cap);
+      }
+      return response;
+    })
+    .catch(() => null);
+  const timer = new Promise((resolve) => {
+    setTimeout(() => resolve(null), timeoutMs);
+  });
+
+  const respond = (async () => {
+    const raced = await Promise.race([network, timer]);
+    if (raced) {
+      return raced.clone();
+    }
+    const cache = await caches.open(cacheName);
+    return (await cache.match(request)) ?? null;
+  })();
+
+  return { respond, network };
+}
+
 /* ── Install / activate ──────────────────────────────────────────────────── */
 
 self.addEventListener("install", (event) => {
@@ -291,12 +321,12 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (!sameOrigin) {
-    // Cross-origin API GET — stale-while-revalidate (handles the FastAPI data).
+    // Cross-origin API GET — network-first with cached fallback.
     if (pathname.startsWith("/ws")) {
       return;
     }
-    const { respond, revalidate } = staleWhileRevalidate(request, API_CACHE, API_CAP, API_FRESH_MS);
-    event.waitUntil(revalidate.then(() => undefined));
+    const { respond, network } = networkFirst(request, API_CACHE, API_CAP, API_TIMEOUT_MS);
+    event.waitUntil(network.then(() => undefined));
     event.respondWith(
       respond.then(
         (response) =>

@@ -10,8 +10,11 @@ from typing import Any
 
 import bcrypt
 import jwt
+from fastapi import Response
 
 from app.core.config import get_settings
+
+REFRESH_COOKIE = "refresh_token"
 
 
 def hash_password(password: str) -> str:
@@ -78,3 +81,30 @@ def decode_token(token: str, expected_type: str) -> dict[str, Any]:
     if payload.get("type") != expected_type:
         raise jwt.InvalidTokenError("Unexpected token type")
     return payload
+
+
+# ── Refresh cookie helpers (shared by auth and data-rights endpoints) ────────
+
+
+def set_refresh_cookie(response: Response, token: str) -> None:
+    settings = get_settings()
+    response.set_cookie(
+        key=REFRESH_COOKIE,
+        value=token,
+        max_age=settings.refresh_token_expire_days * 24 * 60 * 60,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+        path="/auth",
+    )
+
+
+def clear_refresh_cookie(response: Response) -> None:
+    settings = get_settings()
+    response.delete_cookie(
+        key=REFRESH_COOKIE,
+        path="/auth",
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite=settings.cookie_samesite,
+    )

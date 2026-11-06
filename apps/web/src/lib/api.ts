@@ -618,11 +618,17 @@ export interface VerificationRow {
   trainee_signal: string;
 }
 
+export interface MaskedContact {
+  email: string | null;
+  phone: string | null;
+}
+
 export interface TalentPoolRow {
   skill: string;
   trainee_count: number;
   districts: string[];
   trainee_names: string[];
+  contacts: MaskedContact[];
   match_score: number;
 }
 
@@ -675,4 +681,17 @@ export function deletePushSubscription(endpoint: string): Promise<{ status: stri
 /** Ask the API to send a test notification to all of my devices. */
 export function sendTestPush(): Promise<{ sent: number; failed: number; pruned: number }> {
   return api.post("/push/test");
+}
+
+// ── Data rights (Phase 11) ───────────────────────────────────────────────────
+
+/** DPDP-aligned data access right: everything stored about the signed-in
+ * trainee, as one JSON document. */
+export function exportMyData(): Promise<Record<string, unknown>> {
+  return api.get("/trainee/me/export");
+}
+
+/** DPDP-aligned erasure right: permanently deletes the account. */
+export function deleteMyData(): Promise<{ status: string; erased: Record<string, number> }> {
+  return api.post("/trainee/me/delete", { confirm: true });
 }
